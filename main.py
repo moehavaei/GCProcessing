@@ -1,0 +1,230 @@
+import logging
+
+import matplotlib.pyplot as plt
+import tqdm
+from blob_processing import *
+import win32com.client as win32
+
+# Configuring the logging settings
+logging.basicConfig(filename='log.txt', level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+def main() -> None:
+    # Loading the files.
+    path_db, path_blobs, path_nist = 'db.csv', 'blob_table.csv', 'nist_compounds.csv'
+    db, path_db = load_data(path_db, 'Database')
+    blobs, path_blobs = load_data(path_blobs, 'Blobs')
+    nist, path_nist = load_data(path_nist, 'NIST')
+
+    """
+    Provide the calibration information below. You can use one of the two options:
+
+    1. First blob in the table is your internal calibrant with its "Inclusion" set to False:
+        Use the first three lines and comment the next three lines.
+
+    2. Manual input of the calibrant:
+        Use the second line and comment the first line.
+    """
+    cal_compound: Compound = Compound(blobs.loc[0, 'Compound Name'])
+    cal_compound.search(db, nist)
+    calibrant = Calibrant(cal_compound, cal_type="Internal Gas",
+                          cal_volume=blobs.loc[0, 'Volume'], cal_quantity=0.03)
+
+    # compound: Compound = Compound('isobutane')
+    # compound.search(db, nist)
+    # calibrant: Calibrant = Calibrant(compound, cal_type='Internal Gas', cal_volume=134470.7, cal_quantity=2.527403)
+
+    blobs = blob_cleanup(blobs)
+
+    calibrant.calibration_method()
+    calibrant.calibration_curve()
+    blob_list: list[Blob] = []
+    mass_closure: float = 0.0
+
+    # Processing the blobs:
+    for i in tqdm.tqdm(blobs.index):
+        blob = blobs.loc[i]
+        compound = Compound(blob['Compound Name'])
+        try:
+            compound.search(db, nist)
+        except Exception as e:
+            print(f"Error searching for compound {compound}: {e}")
+            logging.error(f"Error searching for compound {compound}: {e}")
+        processed_blob = Blob(compound, retI=5.0, retII=6.0, volume=blob['Volume'], inclusion=True)
+        """
+        Enter the sample amount in the line below:
+        """
+        processed_blob.process(calibrant, sample_amount=1.286 / 25.75 * 29.3)
+        mass_closure += processed_blob.wt_yield
+        blob_list.append(processed_blob)
+
+    # Updating the database with the blobs that were not found in the database:
+    update_db(db, path_db, blob_list)
+
+    normalized = False
+
+    """
+    Normalizing the blobs in the list. Calibrant needs to be entered so that if Internal Liquid has been used, 
+    the quantity of the calibrant is taken into account:
+    """
+
+    # blob_list, normalized = normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrant=calibrant)
+
+    # Populating a DataFrame with the useful information from the blobs:
+    blob_df = blob_list_to_dataframe(blob_list)
+
+    """
+    If you want to plot the calibration curve, uncomment the line below (not the actual comment!):
+    """
+    # Plotting the calibration curve (for external calibrations)
+    # plot_calibration(calibrant.cal_quantity, calibrant.cal_volume, calibrant.curve, cal_type=calibrant.cal_type)
+
+    # Colors used in the graphs:
+    colors: list[str] = [
+        '#008080',  # Teal
+        '#FF6F61',  # Coral
+        '#FFD700',  # Gold
+        '#6A5ACD',  # Slate Blue
+        '#DC143C',  # Crimson
+        '#3CB371',  # Medium Sea Green
+        '#4169E1',  # Royal Blue
+        '#FF1493',  # Deep Pink
+        '#B8860B',  # Dark Goldenrod
+        '#4B0082',  # Indigo
+        '#999999',  # Gray
+        '#70163C',  # Tyrian purple
+        '#95B2B8',  # Cadet gray
+        '#F4D1AE'  # Light orange
+    ]
+
+    """
+    The section below generates the output of the code including the graphs and the Excel file.
+    """
+
+    # Plotting the combined data using subplots (2×2):
+    plt.rcParams["font.family"] = "Times New Roman"
+    fig, axs = plt.subplots(2, 2, figsize=(15, 12))
+
+    # Pie chart for elemental composition of the sample:
+    elemental_composition = blob_df[['C', 'H', 'O', 'N', 'Cl', 'S', 'F', 'Si', 'Br', 'I']].sum()
+    non_zero_elements = elemental_composition[elemental_composition > 0]
+    explode = [0.1 * i if s < 2 else 0 for i, s in enumerate(non_zero_elements.values)]
+    axs[0, 0].pie(non_zero_elements, autopct='%1.1f%%', labels=non_zero_elements.keys(), colors=colors,
+                  radius=0.8, labeldistance=1.5, pctdistance=1.3, explode=explode)
+    axs[0, 0].set_title('Elemental Composition', fontsize='xx-large', fontweight='bold')
+
+    # Stacked bar plot of the group-type C# distribution:
+    group_name_yields = blob_df.pivot_table(index='C#', columns='Group Name', values='Yield [wt.%]', aggfunc='sum')
+    group_name_yields.plot(kind='bar', stacked=True, ax=axs[0, 1], rot=0, color=colors)
+    axs[0, 1].legend(title='Group', title_fontsize='x-large')
+    axs[0, 1].set_title('Grouped carbon number distribution', fontsize='xx-large', fontweight='bold')
+    axs[0, 1].set_xlabel('C#', fontsize='x-large')
+    axs[0, 1].set_ylabel('Yield [wt. %]', fontsize='x-large')
+
+    # Carbon number distribution
+    grouped = blob_df.groupby('C#').sum()
+    axs[1, 0].bar(grouped.index, grouped['Yield [wt.%]'], label='Yield [wt. %]', color=colors[6])
+    axs[1, 0].legend(title_fontsize='x-large')
+    axs[1, 0].set_title('Carbon number distribution', fontsize='xx-large', fontweight='bold')
+    axs[1, 0].set_xlabel('C#', fontsize='x-large')
+    axs[1, 0].set_ylabel('Yield [wt. %]', fontsize='x-large')
+    axs[1, 0].set_xticks(np.arange(1, max(grouped.index) + 1, 1))
+
+    # PIONA bubble chart
+    piona: pd.DataFrame = piona_table(blob_df)
+    y_labels: list[str] = piona.index[0:5]
+    x_labels: list[str] = piona.columns
+    x, y = np.meshgrid(range(len(x_labels)), range(len(y_labels)))
+    bubble_color = piona.iloc[0: 5].values.flatten()
+    bubble_size = (bubble_color) / max(bubble_color) * 10
+    bubble_chart = axs[1, 1].scatter(x.flatten(), y.flatten(), s=bubble_size * 50, c=bubble_color, alpha=0.8,
+                                     edgecolors='w', cmap='viridis')
+    axs[1, 1].grid(True, which='both', linestyle='--', linewidth=0.5)
+    axs[1, 1].set_xticks(range(len(x_labels)))
+    axs[1, 1].set_yticks(range(len(y_labels)))
+    axs[1, 1].set_xticklabels(x_labels, rotation=45, ha="right")
+    axs[1, 1].set_yticklabels(y_labels)
+    axs[1, 1].set_xlabel('Group Name')
+    cbar = plt.colorbar(bubble_chart, ax=axs[1, 1])
+    cbar.set_label('Yield [wt.%]')
+    axs[1, 1].grid(True, which='both', linestyle='--', linewidth=0.5)
+    axs[1, 1].set_title('PIONA', fontsize='xx-large', fontweight='bold')
+
+    # Saving the combined charts
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_graphs.svg', bbox_inches='tight', format='svg')
+    plt.show()
+
+    # Saving individual plots
+
+    plt.pie(non_zero_elements, autopct='%1.1f%%', labels=non_zero_elements.keys(), colors=colors,
+            radius=0.8, labeldistance=1.5, pctdistance=1.3, explode=explode)
+    plt.title('Elemental Composition', fontsize='xx-large', fontweight='bold')
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_elemental_composition.svg', bbox_inches='tight', format='svg')
+
+    plt.clf()
+
+    group_name_yields.plot(kind='bar', stacked=True, rot=0, color=colors)
+    plt.legend(title='Group', title_fontsize='x-large')
+    plt.title('Grouped carbon number distribution', fontsize='xx-large', fontweight='bold')
+    plt.xlabel('C#', fontsize='x-large')
+    plt.ylabel('Yield [wt. %]', fontsize='x-large')
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_grouped_cnumber.svg', bbox_inches='tight', format='svg')
+
+    plt.clf()
+
+    plt.bar(grouped.index, grouped['Yield [wt.%]'], label='Yield [wt. %]', color=colors[6])
+    plt.legend(title_fontsize='x-large')
+    plt.title('Carbon number distribution', fontsize='xx-large', fontweight='bold')
+    plt.xlabel('C#', fontsize='x-large')
+    plt.ylabel('Yield [wt. %]', fontsize='x-large')
+    plt.xticks(np.arange(1, max(grouped.index) + 1, 1))
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_cnumber.svg', bbox_inches='tight', format='svg')
+
+    plt.clf()
+
+    fig, ax = plt.subplots(1, 1, figsize=(7.5, 6))
+    bubble_chart = ax.scatter(x.flatten(), y.flatten(), s=bubble_size * 50, c=bubble_color, alpha=0.8,
+                              edgecolors='w', cmap='viridis')
+    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+    ax.set_xticks(range(len(x_labels)))
+    ax.set_yticks(range(len(y_labels)))
+    ax.set_xticklabels(x_labels, rotation=45, ha="right")
+    ax.set_yticklabels(y_labels)
+    ax.set_xlabel('Group Name')
+    cbar = plt.colorbar(bubble_chart, ax=ax)
+    cbar.set_label('Yield [wt.%]')
+    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+    ax.set_title('PIONA', fontsize='xx-large', fontweight='bold')
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_piona.svg', bbox_inches='tight', format='svg')
+    plt.clf()
+
+    now = datetime.now()
+    date_time_str = now.strftime("%Y-%m-%d_%H-%M-%S")
+    blob_data_to_export = blob_df.loc[:, ['Compound Name', 'C#', 'Group Name', 'Volume', 'Yield [wt.%]']]
+    group_name_yields.fillna(0, inplace=True)
+    grouped.fillna(0, inplace=True)
+    grouped = grouped.loc[:, 'Yield [wt.%]']
+    non_zero_elements.name = 'Share [wt.%]'
+    overview = pd.DataFrame({'Date': [now.date().__str__(), ''],
+                             'Calibrant': [calibrant.compound.name, ''],
+                             'Calibration type': [calibrant.cal_type, ''],
+                             'Calibration curve': calibrant.curve,
+                             'Normalized': [normalized, ''],
+                             'Mass closure': [mass_closure, ''], })
+    save_path: str = f"{path_blobs.removesuffix(".csv")}_{date_time_str}_output.xlsx"
+    with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+        overview.to_excel(writer, sheet_name='Overview', index=False, startrow=0, startcol=0)
+        blob_data_to_export.to_excel(writer, sheet_name='Compound yields', index=False, startrow=0, startcol=0)
+        group_name_yields.to_excel(writer, sheet_name='Grouped Yields', index=True, startrow=0, startcol=0)
+        grouped.to_excel(writer, sheet_name='C# Distribution', index=True, startrow=0, startcol=0)
+        non_zero_elements.to_excel(writer, sheet_name='Elemental Composition', index=True, startrow=0, startcol=0)
+        piona.to_excel(writer, sheet_name='PIONA', index=True, startrow=0, startcol=0)
+
+    # Open Excel and the file
+    excel = win32.Dispatch("Excel.Application")
+    excel.Visible = True  # Ensure it opens in a new window
+    workbook = excel.Workbooks.Open(save_path)
+
+
+if __name__ == '__main__':
+    main()
