@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import logging
 from tkinter import filedialog as fd
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import timeit
 from xlsxwriter import Workbook
 # import self
@@ -377,17 +377,22 @@ def append_to_csv(file_path: str, df_to_append: pd.DataFrame) -> None:
 
 @dataclass(slots=True)
 class Compound:
-    name: str
-    formula: str = None
-    mol_wt: float = None
-    cas: str = None
-    combustion: float = None
-    mrf: float = None
-    grouping: float = None
-    cnumber: int = None
-    found_in_db: bool = None
-    n_benzene: int = None
-    elements: pd.DataFrame = None
+    name: str | None = None
+    formula: str | None = None
+    mol_wt: float | None = None
+    cas: str | None = None
+    combustion: float | None = None
+    mrf: float | None = None
+    grouping: float | None = None
+    cnumber: int | None = None
+    found_in_db: bool | None = None
+    n_benzene: int | None = None
+    elements: pd.DataFrame | None = None
+    
+    def __post_init__(self):
+        if self.name is None:
+            logging.error('Name of the compound cannot be None. Please provide a valid name.')
+            raise ValueError('Name of the compound cannot be None. Please provide a valid name.')
 
     def search(self, db: pd.DataFrame, nist: pd.DataFrame) -> None:
         """
@@ -396,6 +401,8 @@ class Compound:
         :param nist: DataFrame containing the NIST database.
         :return:
         """
+        compound_info: pd.DataFrame | None
+        found_in_db: bool
         compound_info, found_in_db = compound_search(name=self.name, db=db, nist=nist)
         if compound_info is not None:
             self.formula = compound_info['formula'].iloc[0]
@@ -415,11 +422,11 @@ class Compound:
 @dataclass(slots=True)
 class Calibrant:
     compound: Compound
-    cal_type: str = None
-    cal_quantity: Optional[np.array] | float = None
-    cal_volume: Optional[np.array] | float = None
+    cal_type: str | None = None
+    cal_quantity: np.ndarray | float | None = None
+    cal_volume: np.ndarray | float | None = None
     path: str = 'calibration.csv'
-    curve: list[float] = None
+    curve: list = field(default_factory=list)
 
     def calibration_method(self) -> None:
         """
@@ -505,12 +512,12 @@ class Blob:
     retI: float
     retII: float
     volume: float
-    inclusion: bool = True
-    intensity: float = None
-    mol: float = None
-    mass: float = None
-    wt_yield: float = None
-    elements: pd.DataFrame = None
+    inclusion: bool = field(default=True)
+    intensity: float | None = None
+    mol: float | None = None
+    mass: float | None = None
+    wt_yield: float | None = None
+    elements: pd.DataFrame | None = None
 
     def process(self, calibrant: Calibrant, sample_amount: float = 0.1) -> None:
         """
@@ -627,3 +634,10 @@ def piona_table(blob_df) -> pd.DataFrame:
     piona.index = piona_labels
 
     return piona
+
+if __name__ == "__main__":
+    comp: Compound = Compound()
+    db, path = load_data('db.csv', 'database')
+    nist, path = load_data('nist_compounds.csv', 'NIST library')
+    comp.search(db, nist)
+    print(comp)
