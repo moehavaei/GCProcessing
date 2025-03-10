@@ -215,6 +215,8 @@ def translate_grouping(grouping: float) -> str:
     group_names: dict = {
         1.0: 'Paraffin',
         1.1: 'Naphthene',
+        1.11: 'Dinaphthene',
+        1.12: 'Naphthenoaromatic',
         1.5: 'Olefin',
         2: 'MAH',
         2.2: 'DAH',

@@ -27,8 +27,8 @@ def main() -> None:
     """
     cal_compound: Compound = Compound(blobs.loc[0, 'Compound Name'])
     cal_compound.search(db, nist)
-    calibrant = Calibrant(cal_compound, cal_type="Internal Gas",
-                          cal_volume=blobs.loc[0, 'Volume'], cal_quantity=0.03)
+    calibrant = Calibrant(cal_compound, cal_type="Internal Liquid",
+                          cal_volume=blobs.loc[0, 'Volume'], cal_quantity=0.95)
 
     # compound: Compound = Compound('isobutane')
     # compound.search(db, nist)
@@ -54,14 +54,14 @@ def main() -> None:
         """
         Enter the sample amount in the line below:
         """
-        processed_blob.process(calibrant, sample_amount=1.286 / 25.75 * 29.3)
+        processed_blob.process(calibrant, sample_amount=1)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
 
     # Updating the database with the blobs that were not found in the database:
     update_db(db, path_db, blob_list)
 
-    normalized = False
+    normalized = True
 
     """
     Normalizing the blobs in the list. Calibrant needs to be entered so that if Internal Liquid has been used, 
@@ -97,6 +97,16 @@ def main() -> None:
         '#F4D1AE'  # Light orange
     ]
 
+
+    """
+    The section below checks the mass closure of the sample. If the mass closure is within 5% of 100%, a ✅ is printed,
+    otherwise a ❌ is printed.
+    """
+    if mass_closure < 105 and mass_closure > 95:
+        print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u2705')
+    else:
+        print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u274C')
+
     """
     The section below generates the output of the code including the graphs and the Excel file.
     """
@@ -120,6 +130,7 @@ def main() -> None:
     axs[0, 1].set_title('Grouped carbon number distribution', fontsize='xx-large', fontweight='bold')
     axs[0, 1].set_xlabel('C#', fontsize='x-large')
     axs[0, 1].set_ylabel('Yield [wt. %]', fontsize='x-large')
+    axs[0, 1].set_xticks(np.arange(1, max(group_name_yields.index) + 1, 2))
 
     # Carbon number distribution
     grouped = blob_df.groupby('C#').sum()
@@ -128,7 +139,7 @@ def main() -> None:
     axs[1, 0].set_title('Carbon number distribution', fontsize='xx-large', fontweight='bold')
     axs[1, 0].set_xlabel('C#', fontsize='x-large')
     axs[1, 0].set_ylabel('Yield [wt. %]', fontsize='x-large')
-    axs[1, 0].set_xticks(np.arange(1, max(grouped.index) + 1, 1))
+    axs[1, 0].set_xticks(np.arange(1, max(grouped.index) + 1, 2))
 
     # PIONA bubble chart
     piona: pd.DataFrame = piona_table(blob_df)
@@ -168,6 +179,7 @@ def main() -> None:
     plt.title('Grouped carbon number distribution', fontsize='xx-large', fontweight='bold')
     plt.xlabel('C#', fontsize='x-large')
     plt.ylabel('Yield [wt. %]', fontsize='x-large')
+    plt.xticks(np.arange(1, max(group_name_yields.index) + 1, 2))
     plt.savefig(f'{path_blobs.removesuffix(".csv")}_grouped_cnumber.svg', bbox_inches='tight', format='svg')
 
     plt.clf()
@@ -177,7 +189,7 @@ def main() -> None:
     plt.title('Carbon number distribution', fontsize='xx-large', fontweight='bold')
     plt.xlabel('C#', fontsize='x-large')
     plt.ylabel('Yield [wt. %]', fontsize='x-large')
-    plt.xticks(np.arange(1, max(grouped.index) + 1, 1))
+    plt.xticks(np.arange(1, max(grouped.index) + 1, 2))
     plt.savefig(f'{path_blobs.removesuffix(".csv")}_cnumber.svg', bbox_inches='tight', format='svg')
 
     plt.clf()
