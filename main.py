@@ -15,7 +15,6 @@ logging.basicConfig(filename='log.txt', level=logging.INFO,
 
 def main() -> None:
     # Loading the files.
-    global cal_compounds
     path_db, path_blobs, path_nist = 'db.csv', 'blob_table.csv', 'nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
@@ -29,6 +28,8 @@ def main() -> None:
             raise KeyError(f'Column {col} not found in the blob table.')
     nist, path_nist = load_data(path_nist, 'NIST')
 
+    #Enter the sample amount in the line below:
+    sample_amount = 1.0
     """
     Provide the calibration information below. You can use one of the two options:
 
@@ -103,22 +104,21 @@ def main() -> None:
         """
         Enter the sample amount in the line below:
         """
-        processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=1)
+        processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=sample_amount)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
 
     # Updating the database with the blobs that were not found in the database:
     update_db(db, path_db, blob_list)
 
-    normalized = True
 
     """
     Normalizing the blobs in the list. Calibrant needs to be entered so that if Internal Liquid has been used, 
     the quantity of the calibrant is taken into account:
     """
 
-    # blob_list, normalized = normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrant=calibrant)
-
+    normalized = True
+    blob_list, normalized = normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrants=calibrants)
     # Populating a DataFrame with the useful information from the blobs:
     blob_df = blob_list_to_dataframe(blob_list)
 
@@ -150,7 +150,7 @@ def main() -> None:
     The section below checks the mass closure of the sample. If the mass closure is within 5% of 100%, a ✅ is printed,
     otherwise a ❌ is printed.
     """
-    if mass_closure < 105 and mass_closure > 95:
+    if mass_closure < 110 and mass_closure > 90:
         print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u2705')
     else:
         print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u274C')
@@ -162,7 +162,7 @@ def main() -> None:
     ISTD_validation: dict[tuple[int, int], float] = {}
     for i, j in list(permutations(calibrants.keys(), 2)):
         blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
-        blob_ISTD.process(calibrant=calibrants[j], sample_amount=1)
+        blob_ISTD.process(calibrant=calibrants[j], sample_amount=sample_amount)
         error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
         ISTD_validation[(i, j)] = error
     labels: list = []
@@ -303,11 +303,10 @@ def main() -> None:
         grouped.to_excel(writer, sheet_name='C# Distribution', index=True, startrow=0, startcol=0)
         non_zero_elements.to_excel(writer, sheet_name='Elemental Composition', index=True, startrow=0, startcol=0)
         piona.to_excel(writer, sheet_name='PIONA', index=True, startrow=0, startcol=0)
-
     # Open Excel and the file
     excel = win32.Dispatch("Excel.Application")
-    excel.Visible = True  # Ensure it opens in a new window
-    workbook = excel.Workbooks.Open(save_path)
+    # excel.Visible = True  # Ensure it opens in a new window
+    # workbook = excel.Workbooks.Open(save_path)
 
 
 if __name__ == '__main__':

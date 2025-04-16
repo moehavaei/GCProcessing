@@ -560,20 +560,21 @@ class Blob:
                 element) / self.compound.mol_wt * self.wt_yield
 
 
-def normalize_blob_list(blob_list: list[Blob], mass_closure: float, calibrant: Calibrant) -> tuple[list[Blob], bool]:
+def normalize_blob_list(blob_list: list[Blob], mass_closure: float, calibrants: dict[int, Calibrant]) -> tuple[list[Blob], bool]:
     """
     Normalizes the yields of the blobs in a blob list.
     :param blob_list: List of Blob objects.
     :param mass_closure: The mass closure of the blobs before normalization.
     :return: The normalized blob list and a True boolean declaring that the yields have been normalized.
     """
-    if calibrant.cal_type == 'Internal Liquid':
-        mass_closure = mass_closure - calibrant.cal_quantity
+
+    for calibrant in calibrants.values():
+        if calibrant.cal_type == 'Internal Liquid':
+            mass_closure = mass_closure - calibrant.cal_quantity
     for blob in blob_list:
         blob.wt_yield = blob.wt_yield / mass_closure * 100
         for element in blob.elements.columns:
             blob.elements.loc[0, element] = blob.elements.loc[0, element] / mass_closure * 100
-
     return blob_list, True
 
 
