@@ -87,13 +87,25 @@ def blob_cleanup(raw_blobs: pd.DataFrame) -> pd.DataFrame:
         blobs = raw_blobs[raw_blobs['Inclusion'] == True]
         blobs = blobs.groupby('Compound Name', as_index=False).agg({'Retention I (min)': 'mean',
                                                                     'Retention II (sec)': 'mean',
-                                                                    'Volume': 'sum'})
+                                                                    'Volume': 'sum',
+                                                                    'Internal Standard': 'max'})
         blobs = blobs.sort_values(by=['Retention I (min)', 'Retention II (sec)'], ignore_index=True)
         return blobs
     except KeyError as e:
-        logging.warning(e)
-        print("The inclusion of the blobs were not expressed in the blob table. It's okay for now, but it's better to"
-              " do it right in the future!\n")
+        if 'Retention I (min)' not in raw_blobs.columns or 'Retention II (sec)' not in raw_blobs.columns:
+            logging.warning('Retention time(s) not provided in the blob table. The run proceeded assuming all retention times are 0.0.')
+            print('Retention time(s) not provided in the blob table. The run will proceeded, but this is not recommended.')
+            blobs = raw_blobs.groupby('Compound Name', as_index=False).agg({'Volume': 'sum'})
+            return blobs
+        if 'Inclusion' not in raw_blobs.columns:
+            logging.warning('Inclusion column not provided in the blob table. The run proceeded assuming all blobs are included.')
+            print('Inclusion column not provided in the blob table. The run will proceeded, but this is not recommended.')
+            blobs = raw_blobs.groupby('Compound Name', as_index=False).agg({'Retention I (min)': 'mean',
+                                                                    'Retention II (sec)': 'mean',
+                                                                    'Volume': 'sum',
+                                                                    'Internal Standard': 'max'})
+            return blobs
+        logging.error(e)
         raw_blobs = raw_blobs.groupby('Compound Name', as_index=False).agg({'Retention I (min)': 'mean',
                                                                             'Retention II (sec)': 'mean',
                                                                             'Volume': 'sum'})
@@ -390,7 +402,7 @@ class Compound:
     found_in_db: bool | None = None
     n_benzene: int | None = None
     elements: pd.DataFrame | None = None
-    
+
     def __post_init__(self):
         if self.name is None:
             logging.error('Name of the compound cannot be None. Please provide a valid name.')
@@ -472,24 +484,26 @@ class Calibrant:
         match self.cal_type:
             case 'Internal Gas':
                 if self.cal_quantity is None: self.cal_quantity = float(
-                    input('What is the quantity of the calibrant?\n'))
+                    input(f'What is the quantity of the calibrant {self.compound.name}?\n'))
                 if self.cal_volume is None: self.cal_volume = float(
-                    input('What is the volume of the calibrant peak?\n'))
+                    input(f'What is the volume of the calibrant peak {self.compound.name}?\n'))
                 try:
                     quantity = 0.05 * (self.cal_quantity + 1.01325) * 1e5 * 0.000000118278 / (
                         8.314 * (273.15 + 50)) * self.compound.mol_wt * 1e6
                     self.curve = [self.cal_volume / quantity, 0.0]
                 except ZeroDivisionError:
-                    print('Quantity of the calibrant cannot be zero!')
+                    print(f'Quantity of the calibrant {self.compound.name} cannot be zero!')
+                    logging.error(f'Quantity of the calibrant {self.compound.name} cannot be zero!')
             case 'Internal Liquid':
                 if self.cal_quantity is None: self.cal_quantity = float(
-                    input('What is the concentration (wt.%) of the calibrant?\n'))
+                    input(f'What is the concentration (wt.%) of the calibrant {self.compound.name}?\n'))
                 if self.cal_volume is None: self.cal_volume = float(
-                    input('What is the volume of the calibrant peak?\n'))
+                    input(f'What is the volume of the calibrant peak {self.compound.name}?\n'))
                 try:
                     self.curve = [self.cal_volume / self.cal_quantity, 0.0]
                 except ZeroDivisionError:
                     print('Concentration of the calibrant cannot be zero!')
+                    logging.error(f'Quantity of the calibrant {self.compound.name} cannot be zero!')
             case 'External Gas':
                 calibration_table, _ = load_data(self.path, 'Calibration')
                 cal_curve = LinearRegression(fit_intercept=intercept)
@@ -511,10 +525,11 @@ class Calibrant:
 @dataclass(slots=True)
 class Blob:
     compound: Compound
-    retI: float
-    retII: float
     volume: float
+    retI: float = 0.0
+    retII: float = 0.0
     inclusion: bool = field(default=True)
+    internal_standard: int = field(default=0)
     intensity: float | None = None
     mol: float | None = None
     mass: float | None = None
@@ -553,7 +568,7 @@ def normalize_blob_list(blob_list: list[Blob], mass_closure: float, calibrant: C
     :return: The normalized blob list and a True boolean declaring that the yields have been normalized.
     """
     if calibrant.cal_type == 'Internal Liquid':
-        mass_closure = mass_closure + calibrant.cal_quantity
+        mass_closure = mass_closure - calibrant.cal_quantity
     for blob in blob_list:
         blob.wt_yield = blob.wt_yield / mass_closure * 100
         for element in blob.elements.columns:
@@ -613,10 +628,11 @@ def piona_table(blob_df) -> pd.DataFrame:
     piona_labels[piona_cols[0]] = (blob_df['Group Name'] == "Paraffin")
     piona_labels[piona_cols[1]] = (blob_df['Group Name'] == "i-Paraffin")
     piona_labels[piona_cols[2]] = (blob_df['Group Name'] == "Olefin")
-    piona_labels[piona_cols[3]] = (blob_df['Group Name'] == "Naphthene")
+    piona_labels[piona_cols[3]] = ((blob_df['Group Name'] == "Naphthene") | (blob_df['Group Name'] == "Dinaphthene"))
     piona_labels[piona_cols[4]] = ((blob_df['Group Name'] == "MAH") | (blob_df['Group Name'] == "DAH")
                                    | (blob_df['Group Name'] == "PAH") | (blob_df['Group Name'] == "di-phenyl")
-                                   | (blob_df['Group Name'] == "tris+-phenyl"))
+                                   | (blob_df['Group Name'] == "tris+-phenyl") | (
+                                           blob_df['Group Name'] == "Naphthenoaromatic"))
 
     z = np.zeros((6, 5), float)
     piona = pd.DataFrame(z, columns=piona_cols)

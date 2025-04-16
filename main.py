@@ -1,19 +1,32 @@
 import logging
-
+from collections import defaultdict
+import numpy as np
 import matplotlib.pyplot as plt
 import tqdm
 from blob_processing import *
 import win32com.client as win32
+from itertools import permutations
+from matplotlib.colors import TwoSlopeNorm, LinearSegmentedColormap
 
 # Configuring the logging settings
 logging.basicConfig(filename='log.txt', level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
+
 def main() -> None:
     # Loading the files.
+    global cal_compounds
     path_db, path_blobs, path_nist = 'db.csv', 'blob_table.csv', 'nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
+    blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
+    for col in blob_columns:
+        if col not in blobs.columns:
+            if col in ['Retention I (min)', 'Retention II (sec)']:
+                blobs.drop(columns=['Retention I (min)', 'Retention I'])
+            else:
+                logging.error(f'Column {col} not found in the blob table.')
+            raise KeyError(f'Column {col} not found in the blob table.')
     nist, path_nist = load_data(path_nist, 'NIST')
 
     """
@@ -25,6 +38,35 @@ def main() -> None:
     2. Manual input of the calibrant:
         Use the second line and comment the first line.
     """
+
+    # Finding internal standards
+
+    try:
+        ISTDs_df: pd.DataFrame = blobs[(blobs['Amount'] > 0) & (blobs['Internal Standard'] > 0)]
+        indexes = ISTDs_df.index
+        blobs.drop(indexes, inplace=True)
+        mass_closure: float = ISTDs_df['Amount'].sum()
+    except KeyError as e:
+        print(
+            'Amount column or Internal Standard column not included in the blob table or entered with a different name '
+            '(e.g., Amount (wt.%)). For using this feature, please add the columns to the blob table.')
+        logging.error(
+            'Amount column or Internal Standard column not included in the blob table or entered with a different name '
+            '(e.g., Amount (wt.%)). For using this feature, please add the columns to the blob table.')
+        raise e
+    calibrants = defaultdict(None)
+    # cal_compounds: dict[Calibrant] = defaultdict(list)
+    for i, ISTD in ISTDs_df.iterrows():
+        cal_compound: Compound = Compound(ISTD['Compound Name'])
+        cal_compound.search(db, nist)
+        calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type='Internal Liquid',
+                                                           cal_volume=ISTD['Volume'], cal_quantity=ISTD['Amount']))
+        calibrants[ISTD['Internal Standard']].calibration_method()
+        calibrants[ISTD['Internal Standard']].calibration_curve()
+
+    """
+    The old calibration methods
+    
     cal_compound: Compound = Compound(blobs.loc[0, 'Compound Name'])
     cal_compound.search(db, nist)
     calibrant = Calibrant(cal_compound, cal_type="Internal Liquid",
@@ -33,13 +75,19 @@ def main() -> None:
     # compound: Compound = Compound('isobutane')
     # compound.search(db, nist)
     # calibrant: Calibrant = Calibrant(compound, cal_type='Internal Gas', cal_volume=134470.7, cal_quantity=2.527403)
-
-    blobs = blob_cleanup(blobs)
-
+    
+    
     calibrant.calibration_method()
     calibrant.calibration_curve()
+    
+    mass_closure: float = calibrant.cal_quantity
+    """
+
+    # Agglomerating redundant blobs and removing blobs not intended for inclusion
+    blobs = blob_cleanup(blobs)
+
+    # Creating a list of blobs to be processed:
     blob_list: list[Blob] = []
-    mass_closure: float = 0.0
 
     # Processing the blobs:
     for i in tqdm.tqdm(blobs.index):
@@ -50,11 +98,12 @@ def main() -> None:
         except Exception as e:
             print(f"Error searching for compound {compound}: {e}")
             logging.error(f"Error searching for compound {compound}: {e}")
-        processed_blob = Blob(compound, retI=5.0, retII=6.0, volume=blob['Volume'], inclusion=True)
+        processed_blob = Blob(compound, retI=blob['Retention I (min)'], retII=blob['Retention II (sec)'],
+                              volume=blob['Volume'], inclusion=True, internal_standard=blob['Internal Standard'],)
         """
         Enter the sample amount in the line below:
         """
-        processed_blob.process(calibrant, sample_amount=1)
+        processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=1)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
 
@@ -97,7 +146,6 @@ def main() -> None:
         '#F4D1AE'  # Light orange
     ]
 
-
     """
     The section below checks the mass closure of the sample. If the mass closure is within 5% of 100%, a ✅ is printed,
     otherwise a ❌ is printed.
@@ -108,11 +156,35 @@ def main() -> None:
         print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u274C')
 
     """
+    Verification of the ISTDs.
+    """
+    plt.rcParams["font.family"] = "Times New Roman"
+    ISTD_validation: dict[tuple[int, int], float] = {}
+    for i, j in list(permutations(calibrants.keys(), 2)):
+        blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
+        blob_ISTD.process(calibrant=calibrants[j], sample_amount=1)
+        error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
+        ISTD_validation[(i, j)] = error
+    labels: list = []
+    for i, j in ISTD_validation.keys():
+        labels.append(f'{calibrants[i].compound.name} using {calibrants[j].compound.name}')
+    error_max = np.max(np.abs(list(ISTD_validation.values())))
+
+    # Custom diverging colormap: red-green-red
+    color_gradient: list[tuple[int, int, int]] = [(1, 0, 0), (0, 1, 0), (1, 0, 0)]  # red → green → red
+    cmap: LinearSegmentedColormap = LinearSegmentedColormap.from_list("red-green-red", color_gradient, N=256)
+    norm: TwoSlopeNorm = TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
+
+    fig, ax = plt.subplots(figsize=(9, len(ISTD_validation) * 1.0))
+    bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()), color=cmap(norm(list(ISTD_validation.values()))))
+    plt.tight_layout()
+    plt.show()
+
+    """
     The section below generates the output of the code including the graphs and the Excel file.
     """
 
     # Plotting the combined data using subplots (2×2):
-    plt.rcParams["font.family"] = "Times New Roman"
     fig, axs = plt.subplots(2, 2, figsize=(15, 12))
 
     # Pie chart for elemental composition of the sample:
@@ -218,9 +290,9 @@ def main() -> None:
     grouped = grouped.loc[:, 'Yield [wt.%]']
     non_zero_elements.name = 'Share [wt.%]'
     overview = pd.DataFrame({'Date': [now.date().__str__(), ''],
-                             'Calibrant': [calibrant.compound.name, ''],
-                             'Calibration type': [calibrant.cal_type, ''],
-                             'Calibration curve': calibrant.curve,
+                             'Calibrant(s)': [calibrant.compound.name for calibrant in calibrants.values()],
+                             'Calibration type': [calibrant.cal_type for calibrant in calibrants.values()],
+                             'Calibration curve': [calibrant.curve for calibrant in calibrants.values()],
                              'Normalized': [normalized, ''],
                              'Mass closure': [mass_closure, ''], })
     save_path: str = f"{path_blobs.removesuffix(".csv")}_{date_time_str}_output.xlsx"
@@ -241,3 +313,4 @@ def main() -> None:
 if __name__ == '__main__':
     logging.info('Main program started')
     main()
+    logging.info('Main program finished')
