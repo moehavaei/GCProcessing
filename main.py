@@ -65,6 +65,12 @@ def main() -> None:
         calibrants[ISTD['Internal Standard']].calibration_method()
         calibrants[ISTD['Internal Standard']].calibration_curve()
 
+    external_calibrant_comp: Compound = Compound('n-Hexane')
+    external_calibrant_comp.search(db, nist)
+    external_calibrant: Calibrant = Calibrant(external_calibrant_comp, cal_type='External Liquid', path='calibration.csv')
+    external_calibrant.calibration_method()
+    external_calibrant.calibration_curve()
+    calibrants[0] = external_calibrant
     """
     The old calibration methods
     
@@ -126,7 +132,7 @@ def main() -> None:
     If you want to plot the calibration curve, uncomment the line below (not the actual comment!):
     """
     # Plotting the calibration curve (for external calibrations)
-    # plot_calibration(calibrant.cal_quantity, calibrant.cal_volume, calibrant.curve, cal_type=calibrant.cal_type)
+    plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
 
     # Colors used in the graphs:
     colors: list[str] = [
@@ -161,10 +167,11 @@ def main() -> None:
     plt.rcParams["font.family"] = "Times New Roman"
     ISTD_validation: dict[tuple[int, int], float] = {}
     for i, j in list(permutations(calibrants.keys(), 2)):
-        blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
-        blob_ISTD.process(calibrant=calibrants[j], sample_amount=sample_amount)
-        error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
-        ISTD_validation[(i, j)] = error
+        if calibrants[i].cal_type not in ['External Liquid', 'External Gas']:
+            blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
+            blob_ISTD.process(calibrant=calibrants[j], sample_amount=sample_amount)
+            error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
+            ISTD_validation[(i, j)] = error
     labels: list = []
     for i, j in ISTD_validation.keys():
         labels.append(f'{calibrants[i].compound.name} using {calibrants[j].compound.name}')
@@ -177,7 +184,10 @@ def main() -> None:
 
     fig, ax = plt.subplots(figsize=(9, len(ISTD_validation) * 1.0))
     bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()), color=cmap(norm(list(ISTD_validation.values()))))
+    ax.set_xlabel('Error [%]', fontsize='x-large')
+    ax.axvline(0, color='gray', linestyle='--', linewidth=1)
     plt.tight_layout()
+    plt.savefig(f'{path_blobs.removesuffix(".csv")}_ISTD_validation.svg', bbox_inches='tight', format='svg')
     plt.show()
 
     """
@@ -289,12 +299,12 @@ def main() -> None:
     grouped.fillna(0, inplace=True)
     grouped = grouped.loc[:, 'Yield [wt.%]']
     non_zero_elements.name = 'Share [wt.%]'
-    overview = pd.DataFrame({'Date': [now.date().__str__(), ''],
+    overview = pd.DataFrame({'Date': [now.date().__str__(), '', ''],
                              'Calibrant(s)': [calibrant.compound.name for calibrant in calibrants.values()],
                              'Calibration type': [calibrant.cal_type for calibrant in calibrants.values()],
                              'Calibration curve': [calibrant.curve for calibrant in calibrants.values()],
-                             'Normalized': [normalized, ''],
-                             'Mass closure': [mass_closure, ''], })
+                             'Normalized': [normalized, '', ''],
+                             'Mass closure': [mass_closure, '', ''], })
     save_path: str = f"{path_blobs.removesuffix(".csv")}_{date_time_str}_output.xlsx"
     with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
         overview.to_excel(writer, sheet_name='Overview', index=False, startrow=0, startcol=0)

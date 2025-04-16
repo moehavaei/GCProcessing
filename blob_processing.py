@@ -42,7 +42,7 @@ def plot_calibration(amounts, responses, cal_curve: list[float], cal_type):
             x = np.linspace(0, max(amounts) * 1.05, 100)
             y = cal_curve[0] * x + cal_curve[1]
             plt.xlabel("Amount\n[µg]")
-    plt.plot(x, y, label=f'y = {cal_curve[0].item():.2f} × x + {cal_curve[1]:.1f}', linestyle='--',
+    plt.plot(x, y, label=f'y = {cal_curve[0]:.2f} × x + {cal_curve[1]:.1f}', linestyle='--',
              linewidth=2,
              color='#EE964B')
     # plt.xlim(0, max(cal['amount']*1.05))
@@ -511,7 +511,7 @@ class Calibrant:
                         8.314 * (273.15 + 50)) * self.compound.mol_wt * 1e6
                 self.cal_volume = calibration_table.iloc[:, 1]
                 cal_curve.fit(self.cal_quantity.values.reshape(-1, 1), self.cal_volume)
-                self.curve = [cal_curve.coef_, cal_curve.intercept_]
+                self.curve = [float(cal_curve.coef_[0]), cal_curve.intercept_]
             case 'External Liquid':
                 calibration_table = pd.read_csv(self.path)
                 cal_curve = LinearRegression(fit_intercept=intercept)
@@ -519,7 +519,7 @@ class Calibrant:
                 self.cal_volume = calibration_table.iloc[:, 1]
                 cal_curve.fit(self.cal_quantity.values.reshape(-1, 1) * 10.0,
                               self.cal_volume.values)  # Multiplied by 10 to convert wt.% to µg.
-                self.curve = [cal_curve.coef_, cal_curve.intercept_]
+                self.curve = [float(cal_curve.coef_[0]), cal_curve.intercept_]
 
 
 @dataclass(slots=True)
