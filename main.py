@@ -8,6 +8,7 @@ import win32com.client as win32
 from itertools import permutations
 from matplotlib.colors import TwoSlopeNorm, LinearSegmentedColormap
 
+pd.set_option('future.no_silent_downcasting', True)
 # Configuring the logging settings
 logging.basicConfig(filename='log.txt', level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -65,14 +66,25 @@ def main() -> None:
         calibrants[ISTD['Internal Standard']].calibration_method()
         calibrants[ISTD['Internal Standard']].calibration_curve()
 
+
+    # External calibration can be added using the lines below:
+    
     external_calibrant_comp: Compound = Compound('n-Hexane')
     external_calibrant_comp.search(db, nist)
     external_calibrant: Calibrant = Calibrant(external_calibrant_comp, cal_type='External Liquid', path='calibration.csv')
     external_calibrant.calibration_method()
     external_calibrant.calibration_curve()
     calibrants[0] = external_calibrant
+
     """
-    The old calibration methods
+    If you want to plot the calibration curve, uncomment the line below (not the actual comment!):
+    """
+    # Plotting the calibration curve (for external calibrations)
+    plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
+
+
+    """
+    #The old calibration methods:
     
     cal_compound: Compound = Compound(blobs.loc[0, 'Compound Name'])
     cal_compound.search(db, nist)
@@ -128,11 +140,6 @@ def main() -> None:
     # Populating a DataFrame with the useful information from the blobs:
     blob_df = blob_list_to_dataframe(blob_list)
 
-    """
-    If you want to plot the calibration curve, uncomment the line below (not the actual comment!):
-    """
-    # Plotting the calibration curve (for external calibrations)
-    plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
 
     # Colors used in the graphs:
     colors: list[str] = [
@@ -164,31 +171,32 @@ def main() -> None:
     """
     Verification of the ISTDs.
     """
-    plt.rcParams["font.family"] = "Times New Roman"
-    ISTD_validation: dict[tuple[int, int], float] = {}
-    for i, j in list(permutations(calibrants.keys(), 2)):
-        if calibrants[i].cal_type not in ['External Liquid', 'External Gas']:
-            blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
-            blob_ISTD.process(calibrant=calibrants[j], sample_amount=sample_amount)
-            error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
-            ISTD_validation[(i, j)] = error
-    labels: list = []
-    for i, j in ISTD_validation.keys():
-        labels.append(f'{calibrants[i].compound.name} using {calibrants[j].compound.name}')
-    error_max = np.max(np.abs(list(ISTD_validation.values())))
+    if len(calibrants) > 1:
+        plt.rcParams["font.family"] = "Times New Roman"
+        ISTD_validation: dict[tuple[int, int], float] = {}
+        for i, j in list(permutations(calibrants.keys(), 2)):
+            if calibrants[i].cal_type not in ['External Liquid', 'External Gas']:
+                blob_ISTD: Blob = Blob(calibrants[i].compound, volume=calibrants[i].cal_volume)
+                blob_ISTD.process(calibrant=calibrants[j], sample_amount=sample_amount)
+                error: float = (blob_ISTD.wt_yield - calibrants[i].cal_quantity) / calibrants[i].cal_quantity * 100
+                ISTD_validation[(i, j)] = error
+        labels: list = []
+        for i, j in ISTD_validation.keys():
+            labels.append(f'{calibrants[i].compound.name} using {calibrants[j].compound.name}')
+        error_max = np.max(np.abs(list(ISTD_validation.values())))
 
-    # Custom diverging colormap: red-green-red
-    color_gradient: list[tuple[int, int, int]] = [(1, 0, 0), (0, 1, 0), (1, 0, 0)]  # red → green → red
-    cmap: LinearSegmentedColormap = LinearSegmentedColormap.from_list("red-green-red", color_gradient, N=256)
-    norm: TwoSlopeNorm = TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
+        # Custom diverging colormap: red-green-red
+        color_gradient: list[tuple[int, int, int]] = [(1, 0, 0), (0, 1, 0), (1, 0, 0)]  # red → green → red
+        cmap: LinearSegmentedColormap = LinearSegmentedColormap.from_list("red-green-red", color_gradient, N=256)
+        norm: TwoSlopeNorm = TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
 
-    fig, ax = plt.subplots(figsize=(9, len(ISTD_validation) * 1.0))
-    bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()), color=cmap(norm(list(ISTD_validation.values()))))
-    ax.set_xlabel('Error [%]', fontsize='x-large')
-    ax.axvline(0, color='gray', linestyle='--', linewidth=1)
-    plt.tight_layout()
-    plt.savefig(f'{path_blobs.removesuffix(".csv")}_ISTD_validation.svg', bbox_inches='tight', format='svg')
-    plt.show()
+        fig, ax = plt.subplots(figsize=(9, len(ISTD_validation) * 1.0))
+        bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()), color=cmap(norm(list(ISTD_validation.values()))))
+        ax.set_xlabel('Error [%]', fontsize='x-large')
+        ax.axvline(0, color='gray', linestyle='--', linewidth=1)
+        plt.tight_layout()
+        plt.savefig(f'{path_blobs.removesuffix(".csv")}_ISTD_validation.svg', bbox_inches='tight', format='svg')
+        plt.show()
 
     """
     The section below generates the output of the code including the graphs and the Excel file.
@@ -299,12 +307,12 @@ def main() -> None:
     grouped.fillna(0, inplace=True)
     grouped = grouped.loc[:, 'Yield [wt.%]']
     non_zero_elements.name = 'Share [wt.%]'
-    overview = pd.DataFrame({'Date': [now.date().__str__(), '', ''],
+    overview = pd.DataFrame({'Date': [now.date().__str__()] + (len(calibrants) - 1) * [''],
                              'Calibrant(s)': [calibrant.compound.name for calibrant in calibrants.values()],
                              'Calibration type': [calibrant.cal_type for calibrant in calibrants.values()],
                              'Calibration curve': [calibrant.curve for calibrant in calibrants.values()],
-                             'Normalized': [normalized, '', ''],
-                             'Mass closure': [mass_closure, '', ''], })
+                             'Normalized': [normalized] + (len(calibrants) - 1) * [''],
+                             'Mass closure': [mass_closure] + (len(calibrants) - 1) * [''], })
     save_path: str = f"{path_blobs.removesuffix(".csv")}_{date_time_str}_output.xlsx"
     with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
         overview.to_excel(writer, sheet_name='Overview', index=False, startrow=0, startcol=0)
@@ -315,8 +323,8 @@ def main() -> None:
         piona.to_excel(writer, sheet_name='PIONA', index=True, startrow=0, startcol=0)
     # Open Excel and the file
     excel = win32.Dispatch("Excel.Application")
-    # excel.Visible = True  # Ensure it opens in a new window
-    # workbook = excel.Workbooks.Open(save_path)
+    excel.Visible = True  # Ensure it opens in a new window
+    workbook = excel.Workbooks.Open(save_path)
 
 
 if __name__ == '__main__':
