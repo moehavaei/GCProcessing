@@ -1,4 +1,65 @@
 # GCProcessing
+## Scope
+This program is designed to process gas chromatography data. It is capable of reading the data from a CSV file, 
+performing calibration, and calculating the amount of compounds in the sample. Although the program is designed with 
+two-dimensional chromatography in mind, it can also be used for one-dimensional chromatography despite the different terminology.
+For the optimal performance of the code, the data should be in a specific format. Failure to follow the format may result in 
+inconsistencies, mistakes, malperformance, or even crashes. The program is designed to be as user-friendly as possible without 
+hiding behind a sophisticated interface. It is therefore recommended to read the documentation and the code carefully before 
+using the program. The code generally contains the main functions necessary to process GC data, but the main objective of this
+program is to provide a framework for the user to build upon. The code is not intended to be a complete solution, but rather a starting 
+point for user-specific developments. 
+
+Please contact me if you have any questions or suggestions. I am open to any feedback and will be happy to help you with the code.
+
+## Technical Requirements
+The code is written in Python 3.12 and requires the following libraries:
+
+* pandas
+* numpy
+* matplotlib
+* xlsxwriter
+* rdkit
+* openpyxl
+* scikit-learn
+* tqdm
+* pywin32
+
+Make sure to install the latest version of all the libraries before running the code. No specific functionality is used from the 
+latest versions of python or the libraries to creat incompatibilities with older versions, but it is recommended to use the latest.
+
+## Input data
+The code requires the following input data all in comma-delimited csv format:
+### Blob table
+This is where the data of the sample (after peak detection and naming) is stored. The format is the default format provided by
+GC Image software. The table should contain the following columns:
+* _Compound Name_: The name of the compound (blob). Multiple blobs are allowed to have the same name. Their volumes will be summed up and
+their retention times is averaged.
+* _Retention Time I (min)_: The retention time of the compound in the first dimension. This is used to sort the blobs.
+* _Retention Time II (sec)_: The retention time of the compound in the second dimension. This is used as the secondary dimension for sorting.
+* _Volume_: The volume of the blob (or area of the peak) in the chromatogram.
+* _Inclusion_: A boolean value (i.e., TRUE/FALSE) indicating whether the blob/peak is included in the quantification or not.
+* _Amount_: The amount of the compound in the sample. This is **ONLY** used for internal standard blobs as this is the program's
+method for determining whether a blob is an internal standard or not. For other compounds, this column should be empty or 0.
+* _Internal Standard_: The internal standard used for the compound. This is an integer assigned by GC Image software to indicate which 
+blob is the internal standard used for the quantification of the specific compound. The actual values can be arbitrary, as long as all the
+compounds with the same internal standard (including the internal standard peak itself) have the same value.
+
+The correct spelling of each column heading is important, but the order is not. Ensure to provide all the columns for optimal performance.
+
+### Database
+This is a database file containing the information of the compounds such as their formula, grouping, molecular weight, etc.
+An example (_db.csv_) is provided with the code, but the user can create their own database file. The database should contain all
+the columns included in the example file. 
+
+### NIST library
+This is a library file containing the information of the compounds such as their formula, molecular weight, InChI, etc. Use the 
+file _nist_compounds.csv_ provided with the code.
+
+### Calibration data
+This is only for external calibration data. The csv file should contain only two columns. The first column must contain the amount
+(wt.% for liquid and bar for gases used in the µ-Pyrolyzer unit) and the second column the peak volume. The headings are not important,
+but the order is.
 ## Formulas
 
 To calculate the compound amount, use the following formula:
@@ -31,7 +92,9 @@ and $n_{Benz}$ is the number of benzene rings in the structure.
 ## Code structure
 
 ### Classes
-In total, there are three classes (all of type *dataclass*) defined in the code for the better organization of the objects. The use of class-objects (instead of lists) negatively impacts the efficiency of the code but results in more readability. The classes used in the code are the following:
+In total, there are three classes (all of type _dataclass_) defined in the code for the better organization of the objects. 
+The use of class-objects (instead of lists) negatively impacts the efficiency of the code but results in more readability. 
+The classes used in the code are the following:
 
 * Compound
 * Calibrant
@@ -54,9 +117,12 @@ class Compound:
     n_benzene: int | None = None
     elements: pd.DataFrame | None = None
 ```
-The *Compound* class is used for all of the other objects since every calibrant and every blob also representes a compound. The only mandatory input for a Compound object is the name. If the name is not provided, a ValueError will be raised warning the user.
+The _Compound_ class is used for all the other objects since every calibrant and every blob also represents a compound. 
+The only mandatory input for a Compound object is the name. If the name is not provided, a ValueError will be raised warning the user.
 
-The compound object can fill up the necessary information using the *.search* method. To get the information, *compound_search* function (defined outside the namespace of the class) is used. The function searches first through a database file (i.e., db) and if failed, in the NIST library file (nist)
+The compound object can fill up the necessary information using the _.search()_ method. To get the information, _compound_search()_ 
+function (defined outside the scope of the class) is used. The function searches first through a database file (i.e., db) and 
+if failed, in the NIST library file (nist).
 
 ```python
 @dataclass(slots=True)
@@ -68,15 +134,18 @@ class Calibrant:
     path: str = 'calibration.csv'
     curve: list[float] = []
 ```
-
+The _Blob_ class is used to store the information of the blobs. The class also contains the _.process()_ method to calculate
+the amount of the compound in the sample as well as static methods to normalize a blob list and to create a dataframe from the
+blobs for the grouping of the results and presentation.
 ```python
 @dataclass(slots=True)
 class Blob:
     compound: Compound
-    retI: float
-    retII: float
     volume: float
+    retI: float = 0.0
+    retII: float = 0.0
     inclusion: bool = field(default=True)
+    internal_standard: int = field(default=0)
     intensity: float | None = None
     mol: float | None = None
     mass: float | None = None
