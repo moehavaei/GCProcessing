@@ -1,3 +1,4 @@
+import os
 import logging
 from collections import defaultdict
 import numpy as np
@@ -14,9 +15,11 @@ logging.basicConfig(filename='log.txt', level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
+
 def main() -> None:
     # Loading the files.
-    path_db, path_blobs, path_nist = 'db.csv', 'blob_table.csv', 'nist_compounds.csv'
+    current_dir: str = os.getcwd()
+    path_db, path_blobs, path_nist = current_dir + r'\db.csv', current_dir + r'\blob_table.csv', current_dir + r'\nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
     blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
@@ -29,8 +32,6 @@ def main() -> None:
             raise KeyError(f'Column {col} not found in the blob table.')
     nist, path_nist = load_data(path_nist, 'NIST')
 
-    #Enter the sample amount in the line below:
-    sample_amount = 1.0
     """
     Provide the calibration information below. You can use one of the two options:
 
@@ -42,73 +43,38 @@ def main() -> None:
     """
 
     # Finding internal standards
-
-    try:
-        ISTDs_df: pd.DataFrame = blobs[(blobs['Amount'] > 0) & (blobs['Internal Standard'] > 0)]
-        indexes = ISTDs_df.index
-        blobs.drop(indexes, inplace=True)
-        mass_closure: float = ISTDs_df['Amount'].sum()
-    except KeyError as e:
-        print(
-            'Amount column or Internal Standard column not included in the blob table or entered with a different name '
-            '(e.g., Amount (wt.%)). For using this feature, please add the columns to the blob table.')
-        logging.error(
-            'Amount column or Internal Standard column not included in the blob table or entered with a different name '
-            '(e.g., Amount (wt.%)). For using this feature, please add the columns to the blob table.')
-        raise e
-    calibrants = defaultdict(None)
-    # cal_compounds: dict[Calibrant] = defaultdict(list)
-    for i, ISTD in ISTDs_df.iterrows():
-        cal_compound: Compound = Compound(ISTD['Compound Name'])
-        cal_compound.search(db, nist)
-        calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type='Internal Liquid',
-                                                           cal_volume=ISTD['Volume'], cal_quantity=ISTD['Amount']))
-        calibrants[ISTD['Internal Standard']].calibration_method()
-        calibrants[ISTD['Internal Standard']].calibration_curve()
-
-
-    # External calibration can be added using the lines below:
-    
-    external_calibrant_comp: Compound = Compound('n-Hexane')
-    external_calibrant_comp.search(db, nist)
-    external_calibrant: Calibrant = Calibrant(external_calibrant_comp, cal_type='External Liquid', path='calibration.csv')
-    external_calibrant.calibration_method()
-    external_calibrant.calibration_curve()
-    calibrants[0] = external_calibrant
-
-    """
-    If you want to plot the calibration curve, uncomment the line below (not the actual comment!):
-    """
-    # Plotting the calibration curve (for external calibrations)
-    plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
+    calibrants: dict[int, Calibrant] = defaultdict(Calibrant)
+    blobs, calibrants, mass_closure = extract_calibrants(blobs, db, nist)
 
 
     """
-    #The old calibration methods:
-    
-    cal_compound: Compound = Compound(blobs.loc[0, 'Compound Name'])
-    cal_compound.search(db, nist)
-    calibrant = Calibrant(cal_compound, cal_type="Internal Liquid",
-                          cal_volume=blobs.loc[0, 'Volume'], cal_quantity=0.95)
-
-    # compound: Compound = Compound('isobutane')
-    # compound.search(db, nist)
-    # calibrant: Calibrant = Calibrant(compound, cal_type='Internal Gas', cal_volume=134470.7, cal_quantity=2.527403)
-    
-    
-    calibrant.calibration_method()
-    calibrant.calibration_curve()
-    
-    mass_closure: float = calibrant.cal_quantity
+    For external calibration (as a validation for the internal calibration), use the lines below. You may also use the external
+    calibration curve as the primary calibration curve by adding '0' in the Internal Standard column of the blob table.
     """
+
+    # external_calibrant_comp: Compound = Compound('n-Hexane')
+    # external_calibrant_comp.search(db, nist)
+    # external_calibrant: Calibrant = Calibrant(external_calibrant_comp, cal_type='External Liquid', path='calibration.csv')
+    # external_calibrant.calibration_method()
+    # external_calibrant.calibration_curve()
+    # calibrants[0] = external_calibrant
+    #
+    # # Plotting the calibration curve (for external calibrations)
+    # plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
+
 
     # Agglomerating redundant blobs and removing blobs not intended for inclusion
     blobs = blob_cleanup(blobs)
 
-    # Creating a list of blobs to be processed:
+    # Creating a list of processed blobs:
     blob_list: list[Blob] = []
 
     # Processing the blobs:
+    """
+    Enter the sample amount in the line below:
+    """
+    sample_amount: float = 1.0
+
     for i in tqdm.tqdm(blobs.index):
         blob = blobs.loc[i]
         compound = Compound(blob['Compound Name'])
@@ -119,9 +85,6 @@ def main() -> None:
             logging.error(f"Error searching for compound {compound}: {e}")
         processed_blob = Blob(compound, retI=blob['Retention I (min)'], retII=blob['Retention II (sec)'],
                               volume=blob['Volume'], inclusion=True, internal_standard=blob['Internal Standard'],)
-        """
-        Enter the sample amount in the line below:
-        """
         processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=sample_amount)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
@@ -136,9 +99,9 @@ def main() -> None:
     """
 
     normalized = True
-    blob_list, normalized = normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrants=calibrants)
+    blob_list, normalized = Blob.normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrants=calibrants)
     # Populating a DataFrame with the useful information from the blobs:
-    blob_df = blob_list_to_dataframe(blob_list)
+    blob_df = Blob.blob_list_to_dataframe(blob_list)
 
 
     # Colors used in the graphs:
@@ -163,7 +126,7 @@ def main() -> None:
     The section below checks the mass closure of the sample. If the mass closure is within 5% of 100%, a ✅ is printed,
     otherwise a ❌ is printed.
     """
-    if mass_closure < 110 and mass_closure > 90:
+    if 110 > mass_closure > 90:
         print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u2705')
     else:
         print(f'Mass closure before normalization: {mass_closure:.2f} wt.%  \u274C')
