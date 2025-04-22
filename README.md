@@ -134,9 +134,19 @@ class Calibrant:
     path: str = 'calibration.csv'
     curve: list[float] = []
 ```
-The _Blob_ class is used to store the information of the blobs. The class also contains the _.process()_ method to calculate
-the amount of the compound in the sample as well as static methods to normalize a blob list and to create a dataframe from the
-blobs for the grouping of the results and presentation.
+The _Calibrant_ class is used to store the information of the calibrants. Calibrants inherit their properties from the _Compound_ class.
+By default, the internal calibrants (all of the same kind defined in the _extract_calibrants()_ method below) are limitless
+and extracted from the blob table, but the external calibrants need to be added manually to the calibrants dictionary with 
+keys that are not already used. In the main code, key 0 is already assigned to the external calibrant (uncomment the lines to use).
+```python
+blobs, calibrants, mass_closure = extract_calibrants(blobs, 'Internal Liquid', db, nist)
+```
+
+The class contains the following methods:
+* _calibration_method()_: Can be used to ask for the calibration method in case it is not provided already.
+* _calibration_curve()_: Calculates the slope and the intercept of the calibration curve. The curve is stored at self.curve.
+By default, the calibration curve is assumed to be a line, but other functions can be set in the code, if necessary.
+* _plot_calibration()_: Plots the calibration curve using the given amounts and responses and calibration types. Requires the curve to be already calculated.
 ```python
 @dataclass(slots=True)
 class Blob:
@@ -152,6 +162,9 @@ class Blob:
     wt_yield: float | None = None
     elements: pd.DataFrame | None = None
 ```
+The _Blob_ class is used to store the information of the blobs. The class also contains the _.process()_ method to calculate
+the amount of the compound in the sample as well as static methods to normalize a blob list and to create a dataframe from the
+blobs for the grouping of the results and presentation.
 
 ## References
 de Saint Laumer, Jean-Yves, et al. "Quantification in gas chromatography: prediction of flame ionization detector response factors from combustion enthalpies and molecular structures." Analytical chemistry 82.15 (2010): 6457-6462.

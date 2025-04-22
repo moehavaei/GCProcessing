@@ -44,7 +44,7 @@ def main() -> None:
 
     # Finding internal standards
     calibrants: dict[int, Calibrant] = defaultdict(Calibrant)
-    blobs, calibrants, mass_closure = extract_calibrants(blobs, db, nist)
+    blobs, calibrants, mass_closure = extract_calibrants(blobs, 'Internal Liquid', db, nist)
 
 
     """
@@ -60,7 +60,7 @@ def main() -> None:
     # calibrants[0] = external_calibrant
     #
     # # Plotting the calibration curve (for external calibrations)
-    # plot_calibration(external_calibrant.cal_quantity, external_calibrant.cal_volume, external_calibrant.curve, cal_type=external_calibrant.cal_type)
+    # calibrants[0].plot_calibration()
 
 
     # Agglomerating redundant blobs and removing blobs not intended for inclusion

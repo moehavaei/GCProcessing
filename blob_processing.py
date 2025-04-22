@@ -23,44 +23,6 @@ logging.basicConfig(filename='log.txt', level=logging.INFO,
 periodic_table = GetPeriodicTable()
 
 
-def plot_calibration(amounts: list | pd.Series, responses: list | pd.Series, cal_curve: list[float], cal_type: str) -> None:
-    """
-    Plots the calibration curve using the given amounts and responses and calibration types. Requires the curve to be already calculated.
-
-    Example
-    ========
-    plot_calibration(amounts=[1, 2, 3], responses=[1, 2, 3], cal_type='External Gas', cal_curve=[1, 0])
-
-    :param cal_type: Type of the calibration, i.e., "External Gas" or "External Liquid"
-    :param amounts: The array containing the amounts for the calibration points (for gas, in barg).
-    :param responses: The array containing the peak volumes for the calibration points.
-    :param cal_curve: The slope and the intercept of the linear regression, i.e., [a, b] in y = ax + b.
-    :return: None
-    :raises: ValueError if the calibration type is not recognized.
-    """
-    plt.scatter(amounts, responses)
-    match cal_type:
-        case "External Liquid":
-            x = np.linspace(0, max(amounts) * 1.05, 100)
-            y = cal_curve[0] * 10 * x + cal_curve[1]
-            plt.xlabel("Concentration\n[wt.%]")
-        case "External Gas":
-            x = np.linspace(0, max(amounts) * 1.05, 100)
-            y = cal_curve[0] * x + cal_curve[1]
-            plt.xlabel("Amount\n[µg]")
-        case _:
-            logging.error(f'Unknown calibration type: "{cal_type}" entered in the plot_calibration function.')
-            raise ValueError(f'Unknown calibration type: "{cal_type}" entered in the plot_calibration function.')
-    plt.plot(x, y, label=f'y = {cal_curve[0]:.2f} × x + {cal_curve[1]:.1f}', linestyle='--',
-             linewidth=2,
-             color='#EE964B')
-    # plt.xlim(0, max(cal['amount']*1.05))
-    plt.title("Calibration curve")
-
-    plt.ylabel("Detector response")
-    plt.legend()
-    plt.savefig('Calibration.png', format='png', bbox_inches='tight')
-    plt.show()
 
 
 def load_data(path: str, file_name: str) -> tuple[DataFrame, str] | None:
@@ -570,6 +532,45 @@ class Calibrant:
                               self.cal_volume.values)  # Multiplied by 10 to convert wt.% to µg.
                 self.curve = [float(cal_curve.coef_[0]), cal_curve.intercept_]
 
+    def plot_calibration(self) -> None:
+        """
+        Plots the calibration curve using the given amounts and responses and calibration types. Requires the curve to be already calculated.
+
+        :return: None
+        :raises: ValueError if the calibration type is not recognized.
+        """
+        if not isinstance(self.cal_quantity, pd.Series) or not isinstance(self.cal_volume, pd.Series):
+            print('To plot the calibration curve, you will need to provide multiple calibration point in a csv file.')
+            logging.error('To plot the calibration curve, you will need to provide multiple calibration point in a csv file.')
+            return None
+        amounts: pd.Series = self.cal_quantity
+        responses: pd.Series = self.cal_volume
+        cal_curve: list = self.curve
+        cal_type: str = self.cal_type
+
+        plt.scatter(amounts, responses)
+        match cal_type:
+            case "External Liquid":
+                x = np.linspace(0, max(amounts) * 1.05, 100)
+                y = cal_curve[0] * 10 * x + cal_curve[1]
+                plt.xlabel("Concentration\n[wt.%]")
+            case "External Gas":
+                x = np.linspace(0, max(amounts) * 1.05, 100)
+                y = cal_curve[0] * x + cal_curve[1]
+                plt.xlabel("Amount\n[µg]")
+            case _:
+                logging.error(f'Unknown calibration type: "{cal_type}" entered in the plot_calibration function.')
+                raise ValueError(f'Unknown calibration type: "{cal_type}" entered in the plot_calibration function.')
+        plt.plot(x, y, label=f'y = {cal_curve[0]:.2f} × x + {cal_curve[1]:.1f}', linestyle='--',
+                 linewidth=2,
+                 color='#EE964B')
+        # plt.xlim(0, max(cal['amount']*1.05))
+        plt.title("Calibration curve")
+
+        plt.ylabel("Detector response")
+        plt.legend()
+        plt.savefig('Calibration.png', format='png', bbox_inches='tight')
+        plt.show()
 
 @dataclass(slots=True)
 class Blob:
@@ -710,7 +711,16 @@ def piona_table(blob_df: pd.DataFrame) -> pd.DataFrame:
 
     return piona
 
-def extract_calibrants(blobs: pd.DataFrame, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[pd.DataFrame, dict[int, Calibrant], float]:
+def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[pd.DataFrame, dict[int, Calibrant], float]:
+    """
+    This function extracts the calibrants from the blobs DataFrame. It assumes that the blobs DataFrame contains the Internal Standard and Amount columns.
+
+    :param blobs: The DataFrame containing the blobs.
+    :param cal_type: A string indicating the type of calibration (i.e., 'Internal Liquid', 'Internal Gas').
+    :param db: DataFrame containing the database.
+    :param nist: DataFrame containing the NIST database.
+    :return: blobs DataFrame without the internal standards, a dictionary of calibrants, and the total amount of calibrant.
+    """
     try:
         ISTDs_df: pd.DataFrame = blobs[(blobs['Amount'] > 0) & (blobs['Internal Standard'] > 0)]
         indexes = ISTDs_df.index
@@ -728,7 +738,7 @@ def extract_calibrants(blobs: pd.DataFrame, db: pd.DataFrame, nist: pd.DataFrame
     for i, ISTD in ISTDs_df.iterrows():
         cal_compound: Compound = Compound(ISTD['Compound Name'])
         cal_compound.search(db, nist)
-        calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type='Internal Liquid',
+        calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type=cal_type,
                                                            cal_volume=ISTD['Volume'], cal_quantity=ISTD['Amount']))
         calibrants[ISTD['Internal Standard']].calibration_method()
         calibrants[ISTD['Internal Standard']].calibration_curve()
