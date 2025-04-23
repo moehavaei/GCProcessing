@@ -13,8 +13,7 @@ pd.set_option('future.no_silent_downcasting', True)
 # Configuring the logging settings
 logging.basicConfig(filename='log.txt', level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-
+plt.rcParams["font.family"] = "Times New Roman"
 
 def main() -> None:
     # Loading the files.
@@ -46,7 +45,6 @@ def main() -> None:
     calibrants: dict[int, Calibrant] = defaultdict(Calibrant)
     blobs, calibrants, mass_closure = extract_calibrants(blobs, 'Internal Liquid', db, nist)
 
-
     """
     For external calibration (as a validation for the internal calibration), use the lines below. You may also use the external
     calibration curve as the primary calibration curve by adding '0' in the Internal Standard column of the blob table.
@@ -61,7 +59,6 @@ def main() -> None:
     #
     # # Plotting the calibration curve (for external calibrations)
     # calibrants[0].plot_calibration()
-
 
     # Agglomerating redundant blobs and removing blobs not intended for inclusion
     blobs = blob_cleanup(blobs)
@@ -84,15 +81,13 @@ def main() -> None:
             print(f"Error searching for compound {compound}: {e}")
             logging.error(f"Error searching for compound {compound}: {e}")
         processed_blob = Blob(compound, retI=blob['Retention I (min)'], retII=blob['Retention II (sec)'],
-                              volume=blob['Volume'], inclusion=True, internal_standard=blob['Internal Standard'],)
+                              volume=blob['Volume'], inclusion=True, internal_standard=blob['Internal Standard'], )
         processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=sample_amount)
-        print(processed_blob.compound.Tb)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
 
     # Updating the database with the blobs that were not found in the database:
     update_db(db, path_db, blob_list)
-
 
     """
     Normalizing the blobs in the list. Calibrant needs to be entered so that if Internal Liquid has been used, 
@@ -100,11 +95,19 @@ def main() -> None:
     """
 
     normalized = True
-    blob_list, normalized = Blob.normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrants=calibrants)
+    blob_list, normalized = Blob.normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure,
+                                                     calibrants=calibrants)
     # Populating a DataFrame with the useful information from the blobs:
     blob_df = Blob.blob_list_to_dataframe(blob_list)
-    blob_df.plot(kind='scatter', x='Retention I (min)', y='Tb', color='red', legend=False)
-    blob_df.plot(kind='scatter', x='Retention II (sec)', y='Dipole', color='blue', legend=False)
+
+    # Plotting the retention times against the boiling point and dipole moment:
+    fig, axs = plt.subplots(1, 2, figsize=(15, 6))
+    blob_df.plot(kind='scatter', x='Retention I (min)', y='Tb', color='red', legend=False, ax=axs[0])
+    axs[0].set_ylabel('Boiling point [K]', fontsize='large')
+    axs[0].set_xlabel('Retention I (min)', fontsize='large')
+    blob_df.plot(kind='scatter', x='Retention II (sec)', y='Dipole', color='blue', legend=False, ax=axs[1])
+    axs[1].set_xlabel('Retention II (sec)', fontsize='large')
+    axs[1].set_ylabel('Dipole moment [D]', fontsize='large')
 
     # Colors used in the graphs:
     colors: list[str] = [
@@ -137,7 +140,6 @@ def main() -> None:
     Verification of the ISTDs.
     """
     if len(calibrants) > 1:
-        plt.rcParams["font.family"] = "Times New Roman"
         ISTD_validation: dict[tuple[int, int], float] = {}
         for i, j in list(permutations(calibrants.keys(), 2)):
             if calibrants[i].cal_type not in ['External Liquid', 'External Gas']:
@@ -156,7 +158,8 @@ def main() -> None:
         norm: TwoSlopeNorm = TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
 
         fig, ax = plt.subplots(figsize=(9, len(ISTD_validation) * 1.0))
-        bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()), color=cmap(norm(list(ISTD_validation.values()))))
+        bars = ax.barh(list(map(str, labels)), list(ISTD_validation.values()),
+                       color=cmap(norm(list(ISTD_validation.values()))))
         ax.set_xlabel('Error [%]', fontsize='x-large')
         ax.axvline(0, color='gray', linestyle='--', linewidth=1)
         plt.tight_layout()
