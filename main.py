@@ -19,7 +19,7 @@ logging.basicConfig(filename='log.txt', level=logging.INFO,
 def main() -> None:
     # Loading the files.
     current_dir: str = os.getcwd()
-    path_db, path_blobs, path_nist = current_dir + r'\db.csv', current_dir + r'\blob_table.csv', current_dir + r'\nist_compounds.csv'
+    path_db, path_blobs, path_nist = current_dir + r'\db_Tb_dipole.csv', current_dir + r'\blob_table5.csv', current_dir + r'\nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
     blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
@@ -86,6 +86,7 @@ def main() -> None:
         processed_blob = Blob(compound, retI=blob['Retention I (min)'], retII=blob['Retention II (sec)'],
                               volume=blob['Volume'], inclusion=True, internal_standard=blob['Internal Standard'],)
         processed_blob.process(calibrants[processed_blob.internal_standard], sample_amount=sample_amount)
+        print(processed_blob.compound.Tb)
         mass_closure += processed_blob.wt_yield
         blob_list.append(processed_blob)
 
@@ -102,7 +103,8 @@ def main() -> None:
     blob_list, normalized = Blob.normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure, calibrants=calibrants)
     # Populating a DataFrame with the useful information from the blobs:
     blob_df = Blob.blob_list_to_dataframe(blob_list)
-
+    blob_df.plot(kind='scatter', x='Retention I (min)', y='Tb', color='red', legend=False)
+    blob_df.plot(kind='scatter', x='Retention II (sec)', y='Dipole', color='blue', legend=False)
 
     # Colors used in the graphs:
     colors: list[str] = [

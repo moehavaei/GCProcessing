@@ -14,6 +14,7 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors, rdmolops, GetPeriodicTable
 import re
 from sklearn.linear_model import LinearRegression
+import chemicals
 
 # Configuring the logging settings
 logging.basicConfig(filename='log.txt', level=logging.INFO,
@@ -21,8 +22,6 @@ logging.basicConfig(filename='log.txt', level=logging.INFO,
 
 # Initializing the periodic table for MW calculation
 periodic_table = GetPeriodicTable()
-
-
 
 
 def load_data(path: str, file_name: str) -> tuple[DataFrame, str] | None:
@@ -81,17 +80,21 @@ def blob_cleanup(raw_blobs: pd.DataFrame) -> pd.DataFrame | None:
         return blobs
     except KeyError as e:
         if 'Retention I (min)' not in raw_blobs.columns or 'Retention II (sec)' not in raw_blobs.columns:
-            logging.warning('Retention time(s) not provided in the blob table. The run proceeded assuming all retention times are 0.0.')
-            print('Retention time(s) not provided in the blob table. The run will proceeded, but this is not recommended.')
+            logging.warning(
+                'Retention time(s) not provided in the blob table. The run proceeded assuming all retention times are 0.0.')
+            print(
+                'Retention time(s) not provided in the blob table. The run will proceeded, but this is not recommended.')
             blobs = raw_blobs.groupby('Compound Name', as_index=False).agg({'Volume': 'sum'})
             return blobs
         if 'Inclusion' not in raw_blobs.columns:
-            logging.warning('Inclusion column not provided in the blob table. The run proceeded assuming all blobs are included.')
-            print('Inclusion column not provided in the blob table. The run will proceeded, but this is not recommended.')
+            logging.warning(
+                'Inclusion column not provided in the blob table. The run proceeded assuming all blobs are included.')
+            print(
+                'Inclusion column not provided in the blob table. The run will proceeded, but this is not recommended.')
             blobs = raw_blobs.groupby('Compound Name', as_index=False).agg({'Retention I (min)': 'mean',
-                                                                    'Retention II (sec)': 'mean',
-                                                                    'Volume': 'sum',
-                                                                    'Internal Standard': 'max'})
+                                                                            'Retention II (sec)': 'mean',
+                                                                            'Volume': 'sum',
+                                                                            'Internal Standard': 'max'})
             return blobs
         logging.error(e)
         raise KeyError(f'KeyError: {e} in blob_cleanup function. The run cannot proceed without the necessary columns.')
@@ -299,7 +302,7 @@ def prompt_compound(name: str) -> pd.DataFrame:
 
 
 def compound_search(*, name, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[
-    pd.DataFrame, bool] | None:
+                                                                          pd.DataFrame, bool] | None:
     """
     Searches a compound first in a database, and then in the NIST library (both locally available).
     If the compound was not found in either, the user will be prompted for the compound info.
@@ -325,6 +328,8 @@ def compound_search(*, name, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[
     combustion: float = 0.0
     mrf: float = 0.0
     group: float = 0.0
+    Tb: float | None = None
+    dipole: float | None = None
     if not db_search.empty:
         try:
             found_in_db = True
@@ -335,39 +340,58 @@ def compound_search(*, name, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[
             combustion = float(db_search['Combust'].iloc[0])
             mrf = float(db_search['MRF'].iloc[0])
             group = float(db_search['grouping'].iloc[0])
+            Tb = float(db_search['Tb'].iloc[0])
+            dipole = float(db_search['Dipole'].iloc[0])
             for element in (set(elements) & set(formula_broken.columns)):
                 element_quantities[element] = db_search[element].iloc[0]
         except ValueError as e:
             logging.warning(f"Compound {name} had unacceptable values in the database")
             raise ValueError(f"Compound {name} had unacceptable values in the database: {e}")
     else:
-        nist_search = nist[nist['name'].str.lower() == name.lower()]
-        if nist_search.empty:
-            nist_search = nist[nist['synonyms'].str.lower() == name.lower()]
-        if nist_search.empty:
-            nist_search = nist[nist['synonyms'].str.contains(fr"\b{name}\b", case=False, na=False)]
-        if nist_search.empty:
-            nist_search = nist[nist['synonyms'].str.contains(fr"{name}\b", case=False, na=False)]
-        if nist_search.empty:
-            nist_search = nist[nist['synonyms'].str.contains(fr"\b{name}", case=False, na=False)]
-        if nist_search.empty:
-            compound_info = prompt_compound(name)
-            return compound_info, found_in_db
-        else:
-            formula = nist_search['formula'].iloc[0]
-            mol_wt = float(nist_search['mol_weight'].iloc[0])
-            n_benzene = count_benzene_rings(nist_search['inchi'].iloc[0])
-            formula_broken = formula_to_dataframe(formula)
+        try:
+            compound = chemicals.search_chemical(name)
+            formula = compound.formula
+            formula_broken: pd.DataFrame = formula_to_dataframe(formula)
+            mol_wt = compound.MW
+            n_benzene = count_benzene_rings('InChI=1S/' + compound.InChI)
             for element in (set(elements) & set(formula_broken.columns)):
                 element_quantities[element] = formula_broken[element].iloc[0]
             group = grouping(element_quantities, n_benzene)
             combustion, mrf = calculate_mrf(element_quantities, n_benzene)
+            Tb = chemicals.Tb(compound.CAS)
+            dipole = chemicals.dipole.dipole_moment(compound.CAS)
+        except ValueError as e:
+            logging.warning(f"Compound {name} was not found in the database and the 'Chemicals' package.")
+
+            nist_search = nist[nist['name'].str.lower() == name.lower()]
+            if nist_search.empty:
+                nist_search = nist[nist['synonyms'].str.lower() == name.lower()]
+            if nist_search.empty:
+                nist_search = nist[nist['synonyms'].str.contains(fr"\b{name}\b", case=False, na=False)]
+            if nist_search.empty:
+                nist_search = nist[nist['synonyms'].str.contains(fr"{name}\b", case=False, na=False)]
+            if nist_search.empty:
+                nist_search = nist[nist['synonyms'].str.contains(fr"\b{name}", case=False, na=False)]
+            if nist_search.empty:
+                compound_info = prompt_compound(name)
+                return compound_info, found_in_db
+            else:
+                formula = nist_search['formula'].iloc[0]
+                mol_wt = float(nist_search['mol_weight'].iloc[0])
+                n_benzene = count_benzene_rings(nist_search['inchi'].iloc[0])
+                formula_broken = formula_to_dataframe(formula)
+                for element in (set(elements) & set(formula_broken.columns)):
+                    element_quantities[element] = formula_broken[element].iloc[0]
+                group = grouping(element_quantities, n_benzene)
+                combustion, mrf = calculate_mrf(element_quantities, n_benzene)
     compound_info: pd.DataFrame = pd.DataFrame({'formula': [formula],
                                                 'grouping': [group],
                                                 'mol_wt': [mol_wt],
                                                 'n_benzene': [n_benzene],
                                                 'combustion': [combustion],
-                                                'mrf': [mrf]})
+                                                'mrf': [mrf],
+                                                'Tb': [Tb],
+                                                'dipole': [dipole]})
     compound_info = pd.concat([compound_info, element_quantities], axis=1)
     return compound_info, found_in_db
 
@@ -408,6 +432,8 @@ class Compound:
     found_in_db: bool | None = None
     n_benzene: int | None = None
     elements: pd.DataFrame | None = None
+    Tb: float | None = None
+    dipole: float | None = None
 
     def __post_init__(self):
         if not isinstance(self.name, str):
@@ -438,6 +464,8 @@ class Compound:
             self.n_benzene = compound_info['n_benzene']
             self.cnumber = compound_info['C'].iloc[0]
             self.found_in_db = found_in_db
+            self.Tb = compound_info['Tb'].iloc[0]
+            self.dipole = compound_info['dipole'].iloc[0]
 
 
 @dataclass(slots=True)
@@ -481,8 +509,10 @@ class Calibrant:
                     case 'c':
                         self.cal_type = 'Internal Liquid'
                     case _:
-                        logging.critical('Calibration type was not recognized in the "calibration_method()" function. Please, choose a valid calibration type.')
-                        raise ValueError('Calibration type was not recognized. Please, choose a valid calibration type.')
+                        logging.critical(
+                            'Calibration type was not recognized in the "calibration_method()" function. Please, choose a valid calibration type.')
+                        raise ValueError(
+                            'Calibration type was not recognized. Please, choose a valid calibration type.')
 
     def calibration_curve(self, intercept: bool = False) -> None:
         """
@@ -500,7 +530,7 @@ class Calibrant:
                     input(f'What is the volume of the calibrant peak {self.compound.name}?\n'))
                 try:
                     quantity = 0.05 * (self.cal_quantity + 1.01325) * 1e5 * 0.000000118278 / (
-                        8.314 * (273.15 + 50)) * self.compound.mol_wt * 1e6
+                            8.314 * (273.15 + 50)) * self.compound.mol_wt * 1e6
                     self.curve = [self.cal_volume / quantity, 0.0]
                 except ZeroDivisionError:
                     print(f'Quantity of the calibrant {self.compound.name} cannot be zero!')
@@ -541,7 +571,8 @@ class Calibrant:
         """
         if not isinstance(self.cal_quantity, pd.Series) or not isinstance(self.cal_volume, pd.Series):
             print('To plot the calibration curve, you will need to provide multiple calibration point in a csv file.')
-            logging.error('To plot the calibration curve, you will need to provide multiple calibration point in a csv file.')
+            logging.error(
+                'To plot the calibration curve, you will need to provide multiple calibration point in a csv file.')
             return None
         amounts: pd.Series = self.cal_quantity
         responses: pd.Series = self.cal_volume
@@ -571,6 +602,7 @@ class Calibrant:
         plt.legend()
         plt.savefig('Calibration.png', format='png', bbox_inches='tight')
         plt.show()
+
 
 @dataclass(slots=True)
 class Blob:
@@ -610,7 +642,8 @@ class Blob:
                 element) / self.compound.mol_wt * self.wt_yield
 
     @staticmethod
-    def normalize_blob_list(blob_list: list['Blob'], mass_closure: float, calibrants: dict[int, Calibrant]) -> tuple[list['Blob'], bool]:
+    def normalize_blob_list(blob_list: list['Blob'], mass_closure: float, calibrants: dict[int, Calibrant]) -> tuple[
+        list['Blob'], bool]:
         """
         Normalizes the yields of the blobs in a blob list.
         :param calibrants: A dictionary containing the calibrants.
@@ -637,13 +670,19 @@ class Blob:
         :return: Pandas DataFrame containing the important information of the blobs.
         """
         elements: list = ['C', 'H', 'O', 'N', 'Cl', 'S', 'F', 'Si', 'Br', 'I']
-        blob_df = pd.DataFrame(columns=['Compound Name', 'C#', 'Group Name', 'Yield [wt.%]'] + elements)
+        blob_df = pd.DataFrame(
+            columns=['Compound Name', 'C#', 'Group Name', 'Yield [wt.%]', 'Tb', 'Retention I (min)', 'Dipole',
+                     'Retention II (sec)'] + elements)
         for i, blob in enumerate(blob_list):
             blob_df.loc[i, 'Compound Name'] = blob.compound.name
             blob_df.loc[i, 'C#'] = blob.compound.cnumber
             blob_df.loc[i, 'Group Name'] = translate_grouping(blob.compound.grouping)
             blob_df.loc[i, 'Yield [wt.%]'] = blob.wt_yield
             blob_df.loc[i, 'Volume'] = blob.volume
+            blob_df.loc[i, 'Retention I (min)'] = blob.retI
+            blob_df.loc[i, 'Tb'] = blob.compound.Tb
+            blob_df.loc[i, 'Dipole'] = blob.compound.dipole
+            blob_df.loc[i, 'Retention II (sec)'] = blob.retII
             for element in elements:
                 blob_df.loc[i, element] = blob.elements.loc[0, element]
 
@@ -673,6 +712,7 @@ def update_db(db: pd.DataFrame, path: str, blob_list: list[Blob]) -> None:
                 new_compounds.loc[i, element] = blob.compound.elements.loc[0, element]
 
     append_to_csv(path, new_compounds)
+
 
 def piona_table(blob_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -711,7 +751,9 @@ def piona_table(blob_df: pd.DataFrame) -> pd.DataFrame:
 
     return piona
 
-def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[pd.DataFrame, dict[int, Calibrant], float]:
+
+def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nist: pd.DataFrame) -> tuple[
+    pd.DataFrame, dict[int, Calibrant], float]:
     """
     This function extracts the calibrants from the blobs DataFrame. It assumes that the blobs DataFrame contains the Internal Standard and Amount columns.
 
@@ -745,10 +787,18 @@ def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nis
 
     return blobs, calibrants, total_calibrant
 
+
 if __name__ == "__main__":
     ...
     # comp: Compound = Compound()
-    # db, path = load_data('db.csv', 'database')
-    # nist, path = load_data('nist_compounds.csv', 'NIST library')
+    db, path = load_data('db_Tb.csv', 'database')
+    nist, path = load_data('nist_compounds.csv', 'NIST library')
     # comp.search(db, nist)
     # print(comp)
+    # benzene = chemicals.search_chemical('nC49')
+    # nist = pd.read_csv('nist_compounds.csv')
+    # benzene2 = nist[nist['name'].str.lower() == 'benzene']
+    # print(count_benzene_rings('InChI=1S/' + benzene.InChI))
+    # print(benzene2['inchi'].iloc[0])
+    info, _ = compound_search(name='benzene', db=db, nist=nist)
+    print(info['Tb'].iloc[0], _)
