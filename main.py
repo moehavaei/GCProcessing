@@ -18,7 +18,7 @@ plt.rcParams["font.family"] = "Times New Roman"
 def main() -> None:
     # Loading the files.
     current_dir: str = os.getcwd()
-    path_db, path_blobs, path_nist = current_dir + r'\db_Tb_dipole.csv', current_dir + r'\blob_table5.csv', current_dir + r'\nist_compounds.csv'
+    path_db, path_blobs, path_nist = current_dir + r'\db_Tb_dipole.csv', current_dir + r'\blob_table.csv', current_dir + r'\nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
     blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
