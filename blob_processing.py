@@ -707,6 +707,8 @@ def update_db(db: pd.DataFrame, path: str, blob_list: list[Blob]) -> None:
             new_compounds.loc[i, 'n_Benz'] = blob.compound.n_benzene[0]
             new_compounds.loc[i, 'Combust'] = blob.compound.combustion
             new_compounds.loc[i, 'MRF'] = blob.compound.mrf
+            new_compounds.loc[i, 'Tb'] = blob.compound.Tb
+            new_compounds.loc[i, 'Dipole'] = blob.compound.dipole
             elements: list[str] = ['C', 'H', 'O', 'N', 'Cl', 'S', 'F', 'Si', 'Br', 'I']
             for element in elements:
                 new_compounds.loc[i, element] = blob.compound.elements.loc[0, element]
@@ -764,7 +766,7 @@ def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nis
     :return: blobs DataFrame without the internal standards, a dictionary of calibrants, and the total amount of calibrant.
     """
     try:
-        ISTDs_df: pd.DataFrame = blobs[(blobs['Amount'] > 0) & (blobs['Internal Standard'] > 0)]
+        ISTDs_df: pd.DataFrame | pd.Series = blobs[(blobs['Amount'] > 0) & (blobs['Internal Standard'] > 0)]
         indexes = ISTDs_df.index
         blobs.drop(indexes, inplace=True)
         total_calibrant: float = ISTDs_df['Amount'].sum()
@@ -775,15 +777,38 @@ def extract_calibrants(blobs: pd.DataFrame, cal_type: str, db: pd.DataFrame, nis
         logging.error(
             'Amount column or Internal Standard column not included in the blob table or entered with a different name '
             '(e.g., Amount (wt.%)). For using this feature, please add the columns to the blob table.')
-        raise e
+        ISTDs_df = blobs.loc[0].to_frame().T
+
+        ISTDs_df.loc[:, 'Internal Standard'] = 1
+        blobs.loc[:, 'Internal Standard'] = 1
+        if 'Amount' not in ISTDs_df.keys():
+            while True:
+                try:
+                    ISTDs_df['Amount'] = float(input('Please enter the amount of the calibrant:\n'))
+                    total_calibrant = ISTDs_df['Amount']
+                    break
+                except ValueError:
+                    print('Invalid value. Please, enter a number.')
+                    logging.error('Invalid value. Please, enter a number.')
+        else:
+             total_calibrant = ISTDs_df['Amount'].sum()
+        # raise e
     calibrants: dict[int, Calibrant] = defaultdict(None)
-    for i, ISTD in ISTDs_df.iterrows():
-        cal_compound: Compound = Compound(ISTD['Compound Name'])
+    if isinstance(ISTDs_df, pd.DataFrame):
+        for i, ISTD in ISTDs_df.iterrows():
+            cal_compound: Compound = Compound(ISTD['Compound Name'])
+            cal_compound.search(db, nist)
+            calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type=cal_type,
+                                                               cal_volume=ISTD['Volume'], cal_quantity=ISTD['Amount']))
+            calibrants[ISTD['Internal Standard']].calibration_method()
+            calibrants[ISTD['Internal Standard']].calibration_curve()
+    else:
+        cal_compound: Compound = Compound(ISTDs_df['Compound Name'])
         cal_compound.search(db, nist)
-        calibrants[ISTD['Internal Standard']] = (Calibrant(cal_compound, cal_type=cal_type,
-                                                           cal_volume=ISTD['Volume'], cal_quantity=ISTD['Amount']))
-        calibrants[ISTD['Internal Standard']].calibration_method()
-        calibrants[ISTD['Internal Standard']].calibration_curve()
+        calibrants[ISTDs_df['Internal Standard']] = (Calibrant(cal_compound, cal_type=cal_type,
+                                                               cal_volume=ISTDs_df['Volume'], cal_quantity=ISTDs_df['Amount']))
+        calibrants[ISTDs_df['Internal Standard']].calibration_method()
+        calibrants[ISTDs_df['Internal Standard']].calibration_curve()
 
     return blobs, calibrants, total_calibrant
 

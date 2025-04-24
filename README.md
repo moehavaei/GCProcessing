@@ -24,6 +24,7 @@ The code is written in Python 3.12 and requires the following libraries:
 * scikit-learn
 * tqdm
 * pywin32
+* chemicals
 
 Make sure to install the latest version of all the libraries before running the code. No specific functionality is used from the 
 latest versions of python or the libraries to creat incompatibilities with older versions, but it is recommended to use the latest.
@@ -105,7 +106,7 @@ The classes used in the code are the following:
 ```python
 @dataclass(slots=True)
 class Compound:
-    name: str | None = None
+    name: str
     formula: str | None = None
     mol_wt: float | None = None
     cas: str | None = None
@@ -116,14 +117,19 @@ class Compound:
     found_in_db: bool | None = None
     n_benzene: int | None = None
     elements: pd.DataFrame | None = None
+    Tb: float | None = None
+    dipole: float | None = None
 ```
 The _Compound_ class is used for all the other objects since every calibrant and every blob also represents a compound. 
 The only mandatory input for a Compound object is the name. If the name is not provided, a ValueError will be raised warning the user.
-
 The compound object can fill up the necessary information using the _.search()_ method. To get the information, _compound_search()_ 
 function (defined outside the scope of the class) is used. The function searches first through a database file (i.e., db) and 
 if failed, in the NIST library file (nist).
 
+#### _NEW_
+The _Compound_ now also stores the boiling point (Tb) and the dipole moment of the compound. The boiling point is used to calculate the retention time of the compound.
+This information is used to verify the peak assignments using the retention time plots. For this feature to work, please use 
+the new database file (i.e., _db_Tb_dipole.csv_) containing the relevant information and install the chemicals package.
 ```python
 @dataclass(slots=True)
 class Calibrant:

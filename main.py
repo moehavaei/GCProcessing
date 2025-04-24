@@ -18,17 +18,17 @@ plt.rcParams["font.family"] = "Times New Roman"
 def main() -> None:
     # Loading the files.
     current_dir: str = os.getcwd()
-    path_db, path_blobs, path_nist = current_dir + r'\db_Tb_dipole.csv', current_dir + r'\blob_table.csv', current_dir + r'\nist_compounds.csv'
+    path_db, path_blobs, path_nist = current_dir + r'\db_Tb_dipole.csv', current_dir + r'\blob_table2.csv', current_dir + r'\nist_compounds.csv'
     db, path_db = load_data(path_db, 'Database')
     blobs, path_blobs = load_data(path_blobs, 'Blobs')
-    blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
-    for col in blob_columns:
-        if col not in blobs.columns:
-            if col in ['Retention I (min)', 'Retention II (sec)']:
-                blobs.drop(columns=['Retention I (min)', 'Retention I'])
-            else:
-                logging.error(f'Column {col} not found in the blob table.')
-            raise KeyError(f'Column {col} not found in the blob table.')
+    # blob_columns = ['Compound Name', 'Retention I (min)', 'Retention II (sec)', 'Volume', 'Inclusion']
+    # for col in blob_columns:
+    #     if col not in blobs.columns:
+    #         if col in ['Retention I (min)', 'Retention II (sec)']:
+    #             blobs.drop(columns=['Retention I (min)', 'Retention I'])
+    #         else:
+    #             logging.error(f'Column {col} not found in the blob table.')
+    #         raise KeyError(f'Column {col} not found in the blob table.')
     nist, path_nist = load_data(path_nist, 'NIST')
 
     """
@@ -94,7 +94,7 @@ def main() -> None:
     the quantity of the calibrant is taken into account:
     """
 
-    normalized = True
+    normalized = False
     blob_list, normalized = Blob.normalize_blob_list(blob_list=blob_list, mass_closure=mass_closure,
                                                      calibrants=calibrants)
     # Populating a DataFrame with the useful information from the blobs:
