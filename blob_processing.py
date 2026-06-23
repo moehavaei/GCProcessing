@@ -193,7 +193,7 @@ def calculate_mrf(element_composition: pd.DataFrame, n_benzene: int) -> tuple[fl
     :return: enthalpy of combustion (kJ/mol), molecular response factor (1/mol)
     """
     combustion: float = (11.06 + 103.57 * element_composition['C'].iloc[0] + 21.85 * element_composition['H'].iloc[0]
-                         - 48.15 * element_composition['O'].iloc[0] + 7.46 * element_composition['N'].iloc[0]
+                         - 48.18 * element_composition['O'].iloc[0] + 7.46 * element_composition['N'].iloc[0]
                          + 74.67 * element_composition['S'].iloc[0] - 23.57 * element_composition['F'].iloc[0]
                          - 27.43 * element_composition['Cl'].iloc[0] - 11.90 * element_composition['Br'].iloc[0]
                          - 2.04 * element_composition['I'].iloc[0] + 46.5 * element_composition['Si'].iloc[0])
